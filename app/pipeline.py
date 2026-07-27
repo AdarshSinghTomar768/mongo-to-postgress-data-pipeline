@@ -112,3 +112,78 @@ def load_customers(session):
     except Exception as e:
         session.rollback()
         print(f"Error while loading customers: {e}")
+
+
+
+def load_orders(session):
+    """
+    Read orders.jsonl and insert valid orders.
+    """
+
+    print("Loading orders...")
+
+    for order in load_jsonl("data/orders.jsonl"):
+
+        # Validate order
+        valid, reason = validate_order(order)
+
+        if not valid:
+            reject_record(
+                session=session,
+                source_type="order",
+                source_id=order.get("_id"),
+                reason=reason,
+                raw_record=order,
+            )
+            continue
+
+        # Check duplicate order
+        if order_exists(session, order["_id"]):
+            reject_record(
+                session=session,
+                source_type="order",
+                source_id=order["_id"],
+                reason="Duplicate order",
+                raw_record=order,
+            )
+            continue
+
+        # Check whether customer exists
+        customer = (
+            session.query(Customer)
+            .filter(Customer.mongo_id == order["customer_id"])
+            .first()
+        )
+
+        if customer is None:
+            reject_record(
+                session=session,
+                source_type="order",
+                source_id=order["_id"],
+                reason="Customer does not exist",
+                raw_record=order,
+            )
+            continue
+
+        # Create Order ORM object
+        new_order = Order(
+            mongo_id=order["_id"],
+            customer_mongo_id=order["customer_id"],
+            amount=order["amount"],
+            status=order["status"],
+            source_platform=order["source_platform"],
+            order_timestamp=order["order_timestamp"],
+            purchase_city=order["purchase_address"]["city"],
+            purchase_state=order["purchase_address"]["state"],
+            purchase_country=order["purchase_address"]["country"],
+        )
+
+        session.add(new_order)
+
+    try:
+        session.commit()
+        print("Orders loaded successfully.")
+
+    except Exception as e:
+        session.rollback()
+        print(f"Error while loading orders: {e}")
