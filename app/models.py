@@ -6,6 +6,7 @@ from sqlalchemy import (
     Numeric,
     ForeignKey,
     JSON,
+    UniqueConstraint
 )
 
 from sqlalchemy.orm import relationship
@@ -69,6 +70,15 @@ class Order(Base):
 
 class RejectedRecord(Base):
     __tablename__ = "rejected_records"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_type",
+            "source_id",
+            "rejection_reason",
+            name="uq_rejected_record"
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
