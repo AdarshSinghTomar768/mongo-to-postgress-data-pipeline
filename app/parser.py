@@ -1,6 +1,7 @@
 import json
 from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 def parse_extended_json(value):
     """
@@ -14,12 +15,18 @@ def parse_extended_json(value):
             return value["$oid"]
 
         if "$date" in value:
-            return datetime.fromisoformat(
-                value["$date"].replace("Z", "+00:00")
-            )
+            try:
+                return datetime.fromisoformat(
+                    value["$date"].replace("Z", "+00:00")
+                )
+            except ValueError:
+                return value["$date"]
 
         if "$numberDecimal" in value:
-            return Decimal(value["$numberDecimal"])
+            try:
+                return Decimal(value["$numberDecimal"])
+            except (InvalidOperation, TypeError):
+                return value["$numberDecimal"]
 
         return {
             key: parse_extended_json(val)

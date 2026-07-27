@@ -1,4 +1,6 @@
 import re
+from datetime import datetime
+from decimal import Decimal
 
 VALID_PLATFORMS = {
     "android_app",
@@ -29,8 +31,14 @@ def validate_customer(customer):
         if field not in customer or customer[field] in (None, ""):
             return False, f"Missing or empty {field}"
 
+    if not customer["name"].strip():
+        return False, "Invalid name"
+
     if not EMAIL_PATTERN.match(customer["email"]):
         return False, "Invalid email"
+
+    if not isinstance(customer["signup_date"], datetime):
+        return False, "Invalid signup_date"
 
     address = customer["address"]
 
@@ -56,6 +64,12 @@ def validate_order(order):
     for field in required_fields:
         if field not in order or order[field] in (None, ""):
             return False, f"Missing or empty {field}"
+
+    if not isinstance(order["order_timestamp"], datetime):
+        return False, "Invalid order_timestamp"
+
+    if not isinstance(order["amount"], Decimal):
+        return False, "Invalid amount"
 
     if order["amount"] <= 0:
         return False, "Amount must be positive"

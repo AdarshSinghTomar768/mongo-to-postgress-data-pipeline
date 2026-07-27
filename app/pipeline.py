@@ -1,4 +1,6 @@
 from sqlalchemy.exc import IntegrityError
+import json
+import traceback
 
 from app.database import SessionLocal, Base, engine
 from app.models import Customer, Order, RejectedRecord
@@ -15,21 +17,29 @@ def reject_record(session, source_type, source_id, reason, raw_record):
     Stores rejected records.
     If the same rejected record already exists,
     ignore it to keep the pipeline idempotent.
+    Uses a savepoint so that a duplicate rejection
+    does not roll back other pending inserts.
     """
 
     rejected = RejectedRecord(
         source_type=source_type,
         source_id=source_id,
         rejection_reason=reason,
-        raw_record=raw_record,
+        raw_record=json.loads(
+            json.dumps(
+                raw_record,
+                default=str
+            )
+        ),
     )
 
+    savepoint = session.begin_nested()
     try:
         session.add(rejected)
         session.flush()
-
+        savepoint.commit()
     except IntegrityError:
-        session.rollback()
+        savepoint.rollback()
 
 
 def customer_exists(session, mongo_id):
@@ -66,12 +76,22 @@ def load_customers(session):
 
     print("Loading customers...")
 
-    for customer in load_jsonl("data/customers.jsonl"):
+    count = 0
+    valid_count = 0
+    rejected_count = 0
+    seen_ids = set()
 
-        # Validate customer
+    for customer in load_jsonl("data/customers.jsonl"):
+        count += 1
+
         valid, reason = validate_customer(customer)
 
         if not valid:
+            rejected_count += 1
+
+            if rejected_count <= 10:
+                print(f"Rejected: {customer.get('_id')} -> {reason}")
+
             reject_record(
                 session=session,
                 source_type="customer",
@@ -81,37 +101,42 @@ def load_customers(session):
             )
             continue
 
-        # Check duplicate customer
-        if customer_exists(session, customer["_id"]):
+        valid_count += 1
+
+        if valid_count <= 10:
+            print(f"Valid: {customer['_id']}")
+
+        mongo_id = customer["_id"]
+
+        if mongo_id in seen_ids or customer_exists(session, mongo_id):
             reject_record(
                 session=session,
                 source_type="customer",
-                source_id=customer["_id"],
+                source_id=mongo_id,
                 reason="Duplicate customer",
                 raw_record=customer,
             )
             continue
 
-        # Create Customer ORM object
-        new_customer = Customer(
-            mongo_id=customer["_id"],
-            name=customer["name"],
-            email=customer["email"],
-            city=customer["address"]["city"],
-            state=customer["address"]["state"],
-            country=customer["address"]["country"],
-            signup_date=customer["signup_date"],
+        seen_ids.add(mongo_id)
+        session.add(
+            Customer(
+                mongo_id=mongo_id,
+                name=customer["name"],
+                email=customer["email"],
+                city=customer["address"]["city"],
+                state=customer["address"]["state"],
+                country=customer["address"]["country"],
+                signup_date=customer["signup_date"],
+            )
         )
 
-        session.add(new_customer)
+    print(f"Read: {count}")
+    print(f"Valid: {valid_count}")
+    print(f"Rejected: {rejected_count}")
+    print(f"Pending inserts: {len(session.new)}")
 
-    try:
-        session.commit()
-        print("Customers loaded successfully.")
-
-    except Exception as e:
-        session.rollback()
-        print(f"Error while loading customers: {e}")
+    session.commit()
 
 
 
@@ -121,6 +146,8 @@ def load_orders(session):
     """
 
     print("Loading orders...")
+
+    seen_ids = set()
 
     for order in load_jsonl("data/orders.jsonl"):
 
@@ -137,12 +164,14 @@ def load_orders(session):
             )
             continue
 
+        mongo_id = order["_id"]
+
         # Check duplicate order
-        if order_exists(session, order["_id"]):
+        if mongo_id in seen_ids or order_exists(session, mongo_id):
             reject_record(
                 session=session,
                 source_type="order",
-                source_id=order["_id"],
+                source_id=mongo_id,
                 reason="Duplicate order",
                 raw_record=order,
             )
@@ -159,15 +188,17 @@ def load_orders(session):
             reject_record(
                 session=session,
                 source_type="order",
-                source_id=order["_id"],
+                source_id=mongo_id,
                 reason="Customer does not exist",
                 raw_record=order,
             )
             continue
 
+        seen_ids.add(mongo_id)
+
         # Create Order ORM object
         new_order = Order(
-            mongo_id=order["_id"],
+            mongo_id=mongo_id,
             customer_mongo_id=order["customer_id"],
             amount=order["amount"],
             status=order["status"],
@@ -212,9 +243,9 @@ def main():
         print("ETL Pipeline Completed Successfully")
         print("=" * 50)
 
-    except Exception as e:
+    except Exception:
         session.rollback()
-        print(f"Pipeline failed: {e}")
+        traceback.print_exc()
 
     finally:
         session.close()
