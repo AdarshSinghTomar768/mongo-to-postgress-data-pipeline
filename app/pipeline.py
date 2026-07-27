@@ -26,7 +26,7 @@ def reject_record(session, source_type, source_id, reason, raw_record):
 
     try:
         session.add(rejected)
-        session.commit()
+        session.flush()
 
     except IntegrityError:
         session.rollback()
@@ -187,3 +187,38 @@ def load_orders(session):
     except Exception as e:
         session.rollback()
         print(f"Error while loading orders: {e}")
+
+
+
+def main():
+    """
+    Main ETL pipeline execution.
+    """
+
+    session = SessionLocal()
+
+    try:
+        print("=" * 50)
+        print("Starting ETL Pipeline")
+        print("=" * 50)
+
+        # Load customers first
+        load_customers(session)
+
+        # Then load orders
+        load_orders(session)
+
+        print("=" * 50)
+        print("ETL Pipeline Completed Successfully")
+        print("=" * 50)
+
+    except Exception as e:
+        session.rollback()
+        print(f"Pipeline failed: {e}")
+
+    finally:
+        session.close()
+
+
+if __name__ == "__main__":
+    main()
