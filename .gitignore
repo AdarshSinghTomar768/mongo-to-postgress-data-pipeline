@@ -19,3 +19,9 @@ __pycache__/
 
 # Logs
 *.log
+
+# AI Usage
+AI_USAGE.md
+
+# Test database
+test.db
