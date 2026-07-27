@@ -56,3 +56,59 @@ def order_exists(session, mongo_id):
         .first()
         is not None
     )
+
+
+
+def load_customers(session):
+    """
+    Read customers.jsonl and insert valid customers.
+    """
+
+    print("Loading customers...")
+
+    for customer in load_jsonl("data/customers.jsonl"):
+
+        # Validate customer
+        valid, reason = validate_customer(customer)
+
+        if not valid:
+            reject_record(
+                session=session,
+                source_type="customer",
+                source_id=customer.get("_id"),
+                reason=reason,
+                raw_record=customer,
+            )
+            continue
+
+        # Check duplicate customer
+        if customer_exists(session, customer["_id"]):
+            reject_record(
+                session=session,
+                source_type="customer",
+                source_id=customer["_id"],
+                reason="Duplicate customer",
+                raw_record=customer,
+            )
+            continue
+
+        # Create Customer ORM object
+        new_customer = Customer(
+            mongo_id=customer["_id"],
+            name=customer["name"],
+            email=customer["email"],
+            city=customer["address"]["city"],
+            state=customer["address"]["state"],
+            country=customer["address"]["country"],
+            signup_date=customer["signup_date"],
+        )
+
+        session.add(new_customer)
+
+    try:
+        session.commit()
+        print("Customers loaded successfully.")
+
+    except Exception as e:
+        session.rollback()
+        print(f"Error while loading customers: {e}")
